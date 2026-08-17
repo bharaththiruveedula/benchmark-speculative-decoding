@@ -10,9 +10,7 @@ results/*.json
 !results/table_latest.json
 .DS_Store
 ~$*.pptx
-slides/_preview.pdf
-slides/Speculative_Decoding_Serving_Stacks.pptx
-slides/speculative-decoding-UT-template.pptx
+slides/
 *.egg-info/
 .mypy_cache/
 .ruff_cache/
