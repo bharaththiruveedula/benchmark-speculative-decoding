@@ -1,0 +1,27 @@
+# EAGLE-3 SpecForge checkpoint — not interchangeable with vLLM yuhuili/Nebius.
+engine: sglang
+method: eagle3
+base_url: http://127.0.0.1:30000/v1
+port: 30000
+gpu_id: 1
+base_gpu_id: 1
+gpu_index: 1
+model: RedHatAI/Meta-Llama-3.1-8B-Instruct-FP8-dynamic
+dtype: auto
+tensor_parallel_size: 1
+mem_fraction_static: 0.80
+max_model_len: 1024
+disable_cuda_graph: true
+skip_server_warmup: true
+max_tokens: 256
+temperature: 0.0
+concurrency: 1
+max_wait_s: 900
+enable_metrics: true
+prompts: prompts/warmup.jsonl
+speculative:
+  algorithm: EAGLE3
+  draft_model: lmsys/SGLang-EAGLE3-Llama-3.1-8B-Instruct-SpecForge
+  num_steps: 3
+  eagle_topk: 1
+  num_draft_tokens: 4

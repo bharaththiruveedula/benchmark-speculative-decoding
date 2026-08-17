@@ -1,0 +1,19 @@
+# Local 2x RTX 5070 (12GB). Prequantized FP8 (not online quant — that OOMs on 12GB).
+# Weights are same family as vLLM AR, not bit-identical; disclose on slides.
+engine: sglang
+method: ar
+base_url: http://127.0.0.1:30000/v1
+port: 30000
+gpu_id: 1
+model: RedHatAI/Meta-Llama-3.1-8B-Instruct-FP8-dynamic
+dtype: auto
+tensor_parallel_size: 1
+mem_fraction_static: 0.85
+max_model_len: 2048
+max_tokens: 256
+temperature: 0.0
+concurrency: 1
+max_wait_s: 600
+base_gpu_id: 1
+gpu_index: 1
+prompts: prompts/warmup.jsonl

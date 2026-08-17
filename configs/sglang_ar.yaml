@@ -1,0 +1,17 @@
+engine: sglang
+method: ar
+base_url: http://127.0.0.1:30000/v1
+port: 30000
+gpu_index: 0
+enable_metrics: true
+model: meta-llama/Llama-3.1-8B-Instruct
+dtype: bfloat16
+quantization: null
+tensor_parallel_size: 1
+mem_fraction_static: 0.85
+max_model_len: 4096
+max_tokens: 256
+temperature: 0.0
+concurrency: 1
+max_wait_s: 600
+prompts: prompts/warmup.jsonl

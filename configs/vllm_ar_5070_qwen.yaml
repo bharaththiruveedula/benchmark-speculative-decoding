@@ -1,0 +1,17 @@
+# Smoke-test on this machine: Llama-3.1 is gated without an authorized HF login.
+# Qwen2.5-3B-Instruct is already in the local Hugging Face cache.
+engine: vllm
+method: ar
+base_url: http://127.0.0.1:8000/v1
+port: 8000
+model: Qwen/Qwen2.5-3B-Instruct
+dtype: float16
+quantization: null
+tensor_parallel_size: 1
+gpu_memory_utilization: 0.85
+max_model_len: 4096
+max_tokens: 128
+temperature: 0.0
+concurrency: 1
+max_wait_s: 600
+prompts: prompts/warmup.jsonl

@@ -1,0 +1,16 @@
+engine: vllm
+method: ar
+base_url: http://127.0.0.1:8000/v1
+port: 8000
+gpu_index: 0
+model: meta-llama/Llama-3.1-8B-Instruct
+dtype: bfloat16
+quantization: null
+tensor_parallel_size: 1
+gpu_memory_utilization: 0.90
+max_model_len: 4096
+max_tokens: 256
+temperature: 0.0
+concurrency: 1
+max_wait_s: 600
+prompts: prompts/warmup.jsonl

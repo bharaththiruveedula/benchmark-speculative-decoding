@@ -1,0 +1,16 @@
+{"id": "w1", "prompt": "Write a one-sentence definition of speculative decoding."}
+{"id": "w2", "prompt": "List three differences between latency and throughput in LLM serving."}
+{"id": "w3", "prompt": "Explain why autoregressive decoding is memory-bandwidth bound."}
+{"id": "w4", "prompt": "Give a Python function that computes Fibonacci iteratively."}
+{"id": "w5", "prompt": "Summarize the rejection sampling idea used in speculative decoding."}
+{"id": "w6", "prompt": "What is a draft model, and why must it share a tokenizer with the target?"}
+{"id": "w7", "prompt": "Write a short email declining a meeting, professional tone."}
+{"id": "w8", "prompt": "Solve: If 3x + 5 = 20, what is x? Show the steps."}
+{"id": "w9", "prompt": "Describe Medusa heads in two sentences."}
+{"id": "w10", "prompt": "Describe EAGLE speculative decoding in two sentences."}
+{"id": "w11", "prompt": "Why can speculative decoding hurt throughput at high concurrency?"}
+{"id": "w12", "prompt": "Write a bash one-liner that prints GPU memory used by nvidia-smi."}
+{"id": "w13", "prompt": "Compare TTFT and TPOT. When does each matter for a chatbot?"}
+{"id": "w14", "prompt": "Give two risks of mixing vLLM and SGLang numbers in one winner table."}
+{"id": "w15", "prompt": "Write a unit test for a function that clamps an integer into [0, 255]."}
+{"id": "w16", "prompt": "Explain dynamic speculation length in one paragraph."}

@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Speculative Decoding under Production Serving Stacks</title>
+<style>
+  :root{
+    color-scheme: light;
+    --plane:      #f9f8f6;
+    --surface:    #ffffff;
+    --ink:        #16110d;
+    --ink-soft:   #4a423c;
+    --muted:      #8a8079;
+    --line:       #e5ded6;
+    --line-strong:#cabfb4;
+    --accent:     #bf5700;
+    --accent-ink: #ffffff;
+    --dot-before: rgba(191,87,0,0.38);
+    --dot-after:  #bf5700;
+    --font-serif: "Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;
+    --font-sans:  system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --font-mono:  ui-monospace,"SF Mono","SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      color-scheme: dark;
+      --plane:#12100e; --surface:#1c1917; --ink:#f7f3ee; --ink-soft:#cabfb4;
+      --muted:#93897f; --line:#332e29; --line-strong:#4a423c;
+      --accent:#e2701a; --accent-ink:#12100e;
+      --dot-before: rgba(226,112,26,0.38); --dot-after:#e2701a;
+    }
+  }
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --plane:#12100e; --surface:#1c1917; --ink:#f7f3ee; --ink-soft:#cabfb4;
+    --muted:#93897f; --line:#332e29; --line-strong:#4a423c;
+    --accent:#e2701a; --accent-ink:#12100e;
+    --dot-before: rgba(226,112,26,0.38); --dot-after:#e2701a;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--plane); color:var(--ink); font-family:var(--font-sans);
+    -webkit-font-smoothing:antialiased; scrollbar-width:none;
+  }
+  body::-webkit-scrollbar{ display:none; }
+  code{ font-family:var(--font-mono); font-size:0.92em; }
+
+  .deck{ max-width:1180px; margin:0 auto; }
+
+  .slide{
+    min-height:100vh;
+    padding:8px 72px 44px;
+    display:flex;
+    flex-direction:column;
+    border-bottom:1px solid var(--line);
+    position:relative;
+  }
+  .slide:last-child{ border-bottom:none; }
+  .rule-band{ height:6px; background:var(--accent); margin:0 -72px 42px; }
+
+  .chrome-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--muted);
+    padding-bottom:16px;
+    border-bottom:1px solid var(--line);
+    margin-bottom:36px;
+  }
+  .chrome-top .ut{ color:var(--accent); font-weight:600; }
+
+  .slide-body{ flex:1; display:flex; flex-direction:column; justify-content:center; gap:26px; }
+  .slide-body.top-align{ justify-content:flex-start; padding-top:4px; }
+
+  h1.deck-title{
+    font-family:var(--font-serif); font-weight:400;
+    font-size:clamp(38px,5.2vw,64px); line-height:1.06; letter-spacing:-0.01em;
+    margin:0; text-wrap:balance;
+  }
+  h2.slide-title{
+    font-family:var(--font-serif); font-weight:400;
+    font-size:clamp(28px,3.2vw,40px); line-height:1.14; margin:0 0 2px;
+    text-wrap:balance; max-width:23ch;
+  }
+  .kicker{
+    font-family:var(--font-mono); font-size:12px; letter-spacing:0.16em; text-transform:uppercase;
+    color:var(--accent); margin:0 0 8px; font-weight:600;
+  }
+  .lede{ font-size:18px; line-height:1.55; color:var(--ink-soft); max-width:60ch; margin:0; }
+  .lede.small{ font-size:15.5px; }
+
+  .pull{
+    font-family:var(--font-serif); font-size:clamp(23px,2.5vw,30px); line-height:1.35; color:var(--ink);
+    border-left:3px solid var(--accent); padding-left:22px; max-width:46ch; margin:0;
+  }
+
+  ul.bullets{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:14px; max-width:64ch; }
+  ul.bullets li{ font-size:16.5px; line-height:1.55; color:var(--ink-soft); padding-left:22px; position:relative; }
+  ul.bullets li::before{ content:""; position:absolute; left:0; top:8px; width:7px; height:7px; background:var(--accent); }
+  ul.bullets li b, ul.bullets li strong{ color:var(--ink); font-weight:600; }
+  ul.bullets.tight li{ font-size:15px; }
+
+  .two-col{ display:grid; grid-template-columns:0.95fr 1.05fr; gap:40px; align-items:center; }
+  @media (max-width:860px){ .two-col{ grid-template-columns:1fr; } }
+
+  .panel{ background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:16px 18px 10px; }
+  .panel-cap{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--muted); margin:12px 2px 0; display:flex; justify-content:space-between; gap:12px;
+  }
+
+  .chart-svg{ width:100%; height:auto; display:block; }
+  .ref-line{ stroke:var(--line-strong); stroke-width:1.5; stroke-dasharray:3 4; }
+  .tick{ stroke:var(--line-strong); stroke-width:1; }
+  .cat-label{ fill:var(--ink-soft); font-family:var(--font-mono); font-size:12px; }
+  .axis-label{ fill:var(--muted); font-family:var(--font-mono); font-size:11px; }
+  .bar{ fill:var(--dot-before); }
+  .bar-hi{ fill:var(--accent); }
+  .bar-val{ fill:var(--ink); font-family:var(--font-mono); font-size:11px; font-weight:600; }
+  .dumbbell-link{ stroke:var(--line-strong); stroke-width:2; }
+  .dot-before{ fill:var(--dot-before); stroke:var(--surface); stroke-width:3; }
+  .dot-after{ fill:var(--dot-after); stroke:var(--surface); stroke-width:3; }
+  .delta-label{ fill:var(--ink); font-family:var(--font-mono); font-size:12.5px; font-weight:600; }
+
+  table.spec{ border-collapse:collapse; width:100%; font-size:14.5px; }
+  table.spec th, table.spec td{ text-align:left; padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.spec th{ font-family:var(--font-mono); font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted); font-weight:500; }
+  table.spec td.mono, table.spec th.mono{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; text-align:right; }
+  table.spec tr:last-child td{ border-bottom:none; }
+  table.spec.compact{ font-size:12.5px; }
+  table.spec.compact th, table.spec.compact td{ padding:6px 8px; white-space:nowrap; }
+  .table-wrap{ overflow-x:auto; }
+  .hi{ color:var(--accent); font-weight:600; }
+  .lo{ color:#9b2c2c; font-weight:600; }
+  .muted-cell{ color:var(--muted); }
+
+  .stat-tile{ display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+  .stat-value{ font-family:var(--font-serif); font-size:clamp(64px,8vw,110px); line-height:0.9; color:var(--accent); }
+  .stat-label{ font-family:var(--font-mono); font-size:12.5px; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); }
+
+  .grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  .kv{ display:flex; flex-direction:column; gap:2px; padding:13px 0; border-top:1px solid var(--line); }
+  .kv:first-child, .kv:nth-child(2){ border-top:none; }
+  .kv .k{ font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); }
+  .kv .v{ font-size:15.5px; color:var(--ink); }
+
+  .end-note{ font-family:var(--font-mono); font-size:12.5px; color:var(--muted); line-height:1.45; max-width:78ch; }
+  .meas-note{
+    font-family:var(--font-mono); font-size:11.5px; color:var(--muted); line-height:1.45; max-width:78ch; margin:0;
+  }
+  .src-note{ font-family:var(--font-mono); font-size:11px; color:var(--muted); margin:0; }
+  .src-note a, .src-list a{ color:var(--accent); }
+  .val-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:18px; }
+  @media (max-width:860px){ .val-grid{ grid-template-columns:1fr; } }
+  .val-col{
+    background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:14px 16px;
+  }
+  .val-col h3{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--accent); margin:0 0 10px; font-weight:600;
+  }
+  .val-col ul{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+  .val-col li{ font-size:13.5px; line-height:1.45; color:var(--ink-soft); padding-left:14px; position:relative; }
+  .val-col li::before{ content:""; position:absolute; left:0; top:7px; width:5px; height:5px; background:var(--accent); }
+  .src-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; font-size:13.5px; line-height:1.4; color:var(--ink-soft); }
+  .src-list a{ overflow-wrap:anywhere; }
+  .slide.packed .slide-body{ gap:12px; }
+  .slide.packed .chrome-top{ margin-bottom:16px; padding-bottom:10px; }
+  .slide.packed .rule-band{ margin-bottom:20px; }
+  .slide.packed table.spec th, .slide.packed table.spec td{ padding:8px 12px; }
+  .slide.packed{ padding-bottom:28px; }
+  .slide.packed .panel{ padding:12px 14px 8px; }
+  .slide.packed .diagram-svg{ max-height:150px; }
+  .val-col li b{ color:var(--ink); font-weight:600; }
+
+  .title-slide{ padding-top:0; }
+  .title-slide .rule-band{ height:10px; margin-bottom:0; }
+  .title-slide .chrome-top{ border-bottom:none; margin-bottom:0; padding-top:22px; }
+  .title-slide .slide-body{ justify-content:space-between; }
+  .title-block{ display:flex; flex-direction:column; gap:20px; }
+  .ut-wordmark{
+    font-family:var(--font-mono); font-size:13px; letter-spacing:0.2em; text-transform:uppercase;
+    color:var(--accent); font-weight:600;
+  }
+  .title-meta{ font-family:var(--font-mono); font-size:14px; color:var(--ink-soft); display:flex; flex-direction:column; gap:4px; }
+  .title-footer{ display:flex; justify-content:space-between; align-items:flex-end; font-family:var(--font-mono); font-size:12px; color:var(--muted); }
+  .title-thesis{ font-family:var(--font-serif); font-size:19px; color:var(--ink-soft); max-width:52ch; line-height:1.5; }
+
+  .method-name{ font-weight:600; color:var(--ink); }
+  .badge{
+    display:inline-block; font-family:var(--font-mono); font-size:11px; letter-spacing:0.06em;
+    text-transform:uppercase; padding:3px 9px; border-radius:2px; background:var(--accent); color:var(--accent-ink);
+  }
+
+  .flow{ display:flex; align-items:center; gap:0; flex-wrap:wrap; }
+  .flow-step{ background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:15px 17px; min-width:185px; max-width:240px; border-top:3px solid var(--accent); }
+  .flow-step .ft{ font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--accent); margin-bottom:6px; font-weight:600; }
+  .flow-step .fb{ font-size:14px; color:var(--ink-soft); line-height:1.45; }
+  .flow-arrow{ font-family:var(--font-mono); color:var(--muted); font-size:20px; padding:0 12px; }
+
+  figure.diagram-fig{ margin:0; }
+  .diagram-svg{ width:100%; height:auto; display:block; }
+  .dg-box{ fill:var(--surface); stroke:var(--line-strong); stroke-width:1.5; }
+  .dg-box-faint{ fill:var(--surface); stroke:var(--line-strong); stroke-width:1.5; stroke-dasharray:4 3; opacity:0.55; }
+  .dg-box-text{ fill:var(--ink); font-family:var(--font-mono); font-size:13px; }
+  .dg-box-sub{ fill:var(--muted); font-family:var(--font-mono); font-size:10.5px; }
+  .dg-arrow{ stroke:var(--ink-soft); stroke-width:1.5; fill:none; }
+  .dg-arrow-faint{ stroke:var(--line-strong); stroke-width:1.5; fill:none; opacity:0.6; }
+  .dg-arrowhead{ fill:var(--ink-soft); }
+  .dg-arrowhead-faint{ fill:var(--line-strong); }
+  .dg-label{ fill:var(--muted); font-family:var(--font-mono); font-size:10.5px; }
+  .dg-token{ fill:var(--accent); }
+  .dg-token-faint{ fill:var(--accent); opacity:0.5; }
+  .dg-token-text{ fill:var(--accent-ink); font-family:var(--font-mono); font-size:11.5px; font-weight:600; }
+  .dg-dots{ fill:var(--muted); font-family:var(--font-mono); font-size:16px; }
+
+  /* Evidence-first layouts: each slide has one visual job. */
+  .hero-layout{ display:grid; grid-template-columns:1.2fr 0.8fr; gap:64px; align-items:center; }
+  .hero-copy{ display:flex; flex-direction:column; gap:18px; }
+  .hero-range{ border-top:1px solid var(--line-strong); border-bottom:1px solid var(--line-strong); padding:22px 0; }
+  .range-line{ display:flex; align-items:baseline; justify-content:space-between; gap:18px; }
+  .range-number{ font-family:var(--font-serif); font-size:clamp(50px,6vw,82px); line-height:0.95; color:var(--accent); }
+  .range-number.negative{ color:#9b2c2c; }
+  .range-word{ font-family:var(--font-mono); color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.1em; }
+  .hero-question{ font-family:var(--font-serif); font-size:22px; line-height:1.35; margin:0; }
+  .one-line{ font-size:19px; line-height:1.45; color:var(--ink-soft); max-width:68ch; margin:0; }
+  .takeaway{ border-top:1px solid var(--line); padding-top:16px; font-family:var(--font-serif); font-size:22px; line-height:1.35; margin:0; }
+  .quiet-note{ font-family:var(--font-mono); font-size:11px; line-height:1.45; color:var(--muted); margin:0; }
+
+  .mechanism-row{ display:grid; grid-template-columns:1fr 42px 1fr 42px 1fr; align-items:stretch; }
+  .mechanism-step{ padding:20px; border-top:3px solid var(--accent); background:var(--surface); }
+  .mechanism-step .num{ font-family:var(--font-mono); font-size:11px; color:var(--accent); letter-spacing:0.1em; text-transform:uppercase; }
+  .mechanism-step h3{ font-family:var(--font-serif); font-size:25px; font-weight:400; margin:8px 0; }
+  .mechanism-step p{ color:var(--ink-soft); font-size:15px; line-height:1.45; margin:0; }
+  .mechanism-arrow{ display:flex; align-items:center; justify-content:center; color:var(--accent); font-size:25px; }
+  .correctness-strip{ display:flex; justify-content:space-between; gap:24px; border-top:1px solid var(--line); padding-top:14px; }
+  .correctness-strip span{ font-size:14px; line-height:1.4; color:var(--ink-soft); max-width:48ch; }
+  .correctness-strip b{ color:var(--ink); }
+
+  .method-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 30px; }
+  .method-card{ display:grid; grid-template-columns:132px 1fr; gap:16px; border-top:1px solid var(--line-strong); padding:14px 0; }
+  .method-card h3{ font-family:var(--font-serif); font-size:21px; font-weight:400; margin:0; }
+  .method-card p{ font-size:14px; line-height:1.42; color:var(--ink-soft); margin:0; }
+  .method-meta{ font-family:var(--font-mono); font-size:10.5px; color:var(--accent); text-transform:uppercase; letter-spacing:0.07em; margin-top:7px; }
+
+  .setup-pipeline{ display:grid; grid-template-columns:1fr 26px 1fr 26px 1fr; align-items:center; }
+  .setup-node{ border-top:3px solid var(--accent); padding:16px 18px; background:var(--surface); min-height:116px; }
+  .setup-node .label{ font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.08em; color:var(--accent); }
+  .setup-node .value{ font-family:var(--font-serif); font-size:21px; line-height:1.2; margin-top:8px; }
+  .setup-node .detail{ font-size:13.5px; line-height:1.4; color:var(--ink-soft); margin-top:6px; }
+  .pipeline-arrow{ color:var(--muted); text-align:center; font-family:var(--font-mono); }
+  .fact-strip{ display:grid; grid-template-columns:repeat(4,1fr); border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .fact{ padding:13px 16px; border-right:1px solid var(--line); }
+  .fact:last-child{ border-right:none; }
+  .fact .k{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); }
+  .fact .v{ font-size:14px; line-height:1.35; color:var(--ink); margin-top:4px; }
+
+  .control-grid{ display:grid; grid-template-columns:1fr 1fr; gap:42px; }
+  .control-col{ border-top:4px solid var(--accent); padding-top:16px; }
+  .control-col.varies{ border-color:var(--line-strong); }
+  .control-col h3{ font-family:var(--font-serif); font-size:25px; font-weight:400; margin:0 0 14px; }
+  .control-list{ list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:11px; }
+  .control-list li{ font-size:15px; line-height:1.35; color:var(--ink-soft); border-bottom:1px solid var(--line); padding-bottom:10px; }
+  .control-list b{ color:var(--ink); font-weight:600; }
+  .design-warning{ background:var(--ink); color:var(--plane); padding:14px 18px; font-family:var(--mono); font-family:var(--font-mono); font-size:12px; line-height:1.45; }
+
+  .result-board{ display:flex; flex-direction:column; gap:22px; }
+  .engine-result{ display:grid; grid-template-columns:112px 1fr 110px; align-items:center; gap:18px; }
+  .engine-name{ font-family:var(--font-serif); font-size:22px; }
+  .speed-track{ height:18px; background:var(--line); position:relative; }
+  .speed-track::before{ content:""; position:absolute; left:40%; top:-6px; bottom:-6px; border-left:1px dashed var(--muted); }
+  .speed-fill{ height:100%; width:calc(var(--speed) * 40%); background:var(--accent); max-width:100%; }
+  .speed-fill.under{ background:#9b2c2c; }
+  .speed-labels{ display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:10px; color:var(--muted); margin-top:6px; }
+  .speed-value{ font-family:var(--font-serif); font-size:31px; color:var(--accent); text-align:right; }
+  .speed-value.under{ color:#9b2c2c; }
+  .result-method{ font-size:13px; color:var(--ink-soft); margin-top:4px; }
+  .result-summary{ display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:2px; }
+  .summary-cell{ border-top:1px solid var(--line-strong); padding-top:12px; font-size:14px; line-height:1.4; color:var(--ink-soft); }
+  .summary-cell b{ color:var(--ink); }
+
+  .matrix-key{ display:flex; gap:24px; font-family:var(--font-mono); font-size:10.5px; color:var(--muted); }
+  .matrix-key b{ color:var(--ink); }
+  table.matrix th, table.matrix td{ padding:7px 10px; }
+  table.matrix td:first-child{ font-weight:600; }
+  table.matrix .engine-break td{ border-top:2px solid var(--line-strong); }
+
+  .ablation-readout{ display:grid; grid-template-columns:repeat(3,1fr); gap:22px; }
+  .k-readout{ border-top:3px solid var(--line-strong); padding-top:12px; }
+  .k-readout.best{ border-color:var(--accent); }
+  .k-readout h3{ font-family:var(--font-serif); font-size:28px; font-weight:400; margin:0 0 8px; }
+  .k-metrics{ display:flex; justify-content:space-between; gap:14px; }
+  .k-metric .n{ font-family:var(--font-mono); font-size:18px; color:var(--ink); }
+  .k-metric .l{ font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; color:var(--muted); margin-top:3px; }
+
+  .accounting{ font-family:var(--font-serif); font-size:clamp(25px,3vw,36px); text-align:center; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:20px; }
+  .case-list{ display:grid; grid-template-columns:1fr 1fr; gap:16px 34px; }
+  .case{ border-top:2px solid var(--line-strong); padding-top:12px; }
+  .case .case-title{ font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.08em; color:var(--accent); }
+  .case p{ margin:7px 0 0; font-size:14px; line-height:1.4; color:var(--ink-soft); }
+
+  .decision-grid{ display:grid; grid-template-columns:130px 1fr 1fr; border-top:1px solid var(--line-strong); border-left:1px solid var(--line); }
+  .decision-cell{ padding:16px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); min-height:86px; }
+  .decision-cell.head{ font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); min-height:auto; }
+  .decision-cell.rowhead{ font-family:var(--font-serif); font-size:20px; display:flex; align-items:center; }
+  .decision-choice{ font-size:14px; line-height:1.4; color:var(--ink-soft); }
+  .decision-choice b{ display:block; font-family:var(--font-serif); font-size:20px; font-weight:400; color:var(--ink); margin-bottom:4px; }
+
+  .scope-frame{ border:1px solid var(--line-strong); padding:18px; }
+  .scope-out{ font-family:var(--font-mono); font-size:11px; line-height:1.5; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; }
+  .scope-in{ margin-top:16px; background:var(--surface); border-top:4px solid var(--accent); padding:22px; }
+  .scope-in h3{ font-family:var(--font-serif); font-size:27px; font-weight:400; margin:0 0 12px; }
+  .scope-in p{ font-size:15px; line-height:1.5; color:var(--ink-soft); margin:0; }
+  .limit-strip{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .limit{ border-top:1px solid var(--line-strong); padding-top:10px; font-size:13.5px; line-height:1.4; color:var(--ink-soft); }
+  .limit b{ display:block; color:var(--ink); margin-bottom:4px; }
+
+  .close-grid{ display:grid; grid-template-columns:1.1fr 0.9fr; gap:50px; align-items:start; }
+  .close-number{ font-family:var(--font-serif); font-size:76px; line-height:0.9; color:var(--accent); }
+  .close-label{ font-family:var(--font-mono); font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-top:8px; }
+  .close-points{ display:flex; flex-direction:column; gap:18px; }
+  .close-point{ border-top:1px solid var(--line-strong); padding-top:12px; font-size:16px; line-height:1.4; color:var(--ink-soft); }
+  .close-point b{ color:var(--ink); }
+
+  .appendix-grid{ display:grid; grid-template-columns:0.85fr 1.15fr; gap:42px; }
+  .artifact-list{ list-style:none; padding:0; margin:0; }
+  .artifact-list li{ border-top:1px solid var(--line); padding:10px 0; font-size:13.5px; line-height:1.35; color:var(--ink-soft); }
+  .artifact-list b{ color:var(--ink); }
+
+  @media (max-width:860px){
+    .hero-layout,.control-grid,.result-summary,.case-list,.close-grid,.appendix-grid{ grid-template-columns:1fr; }
+    .method-grid{ grid-template-columns:1fr; }
+    .fact-strip,.limit-strip,.ablation-readout{ grid-template-columns:1fr 1fr; }
+    .setup-pipeline{ grid-template-columns:1fr; gap:8px; }
+    .pipeline-arrow{ transform:rotate(90deg); }
+    .mechanism-row{ grid-template-columns:1fr; gap:8px; }
+    .mechanism-arrow{ transform:rotate(90deg); }
+  }
+
+  @media print{ .slide{ break-after:page; min-height:auto; } }
+</style>
+</head>
+<body>
+<div class="deck">
+
+  <!-- 01 TITLE -->
+  <section class="slide title-slide" id="slide-01">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span class="ut">The University of Texas at Austin</span><span>Cockrell School &middot; Scalable Machine Learning</span></div>
+    <div class="slide-body">
+      <div class="hero-layout">
+        <div class="hero-copy">
+          <p class="ut-wordmark">Course Project &middot; Empirical Systems Study</p>
+          <h1 class="deck-title">Speculative decoding<br>under production serving stacks</h1>
+          <p class="hero-question">Does the fastest draft method stay fastest when the serving engine and request load change?</p>
+        </div>
+        <div class="hero-range" aria-label="Observed speedup range">
+          <p class="range-word">Project-reported range</p>
+          <div class="range-line">
+            <div><div class="range-number">2.48&times;</div><div class="range-word">fastest</div></div>
+            <span class="range-word">to</span>
+            <div style="text-align:right"><div class="range-number negative">0.90&times;</div><div class="range-word">slowest</div></div>
+          </div>
+          <p class="quiet-note" style="margin-top:18px;">Same Llama-3.1-8B target &middot; NVIDIA L40 &middot; vLLM + SGLang &middot; concurrency 1 + 16</p>
+        </div>
+      </div>
+      <div class="title-footer">
+        <div class="title-meta">
+          <span>Bharath Thiruveedula &middot; Abhishek Kumar</span>
+          <span>Scalable Machine Learning</span>
+        </div>
+        <span>August 2026</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 MOTIVATION -->
+  <section class="slide packed" id="slide-02">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Motivation</span><span>02 / 15</span></div>
+    <div class="slide-body top-align">
+      <p class="kicker">The bottleneck</p>
+      <h2 class="slide-title">One token commits before the next step can start</h2>
+      <p class="one-line">KV caching avoids recomputing the prompt, but it does not remove the token-to-token dependency.</p>
+      <figure class="diagram-fig panel">
+        <svg class="diagram-svg" viewBox="0 0 800 200" role="img" aria-label="Autoregressive decoding is sequential: each new token depends on the preceding generated token">
+          <defs>
+            <marker id="mo-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+              <polygon points="0,0 8,4 0,8" class="dg-arrowhead"></polygon>
+            </marker>
+            <marker id="mo-arrow-faint" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+              <polygon points="0,0 8,4 0,8" class="dg-arrowhead-faint"></polygon>
+            </marker>
+          </defs>
+          <g>
+            <rect x="20"  y="20" width="120" height="65" rx="6" class="dg-box"></rect>
+            <rect x="175" y="20" width="120" height="65" rx="6" class="dg-box"></rect>
+            <rect x="330" y="20" width="120" height="65" rx="6" class="dg-box"></rect>
+            <rect x="485" y="20" width="120" height="65" rx="6" class="dg-box"></rect>
+            <rect x="640" y="20" width="120" height="65" rx="6" class="dg-box-faint"></rect>
+          </g>
+          <g class="dg-box-text" text-anchor="middle">
+            <text x="80"  y="47">Forward</text><text x="80"  y="62">pass</text>
+            <text x="235" y="47">Forward</text><text x="235" y="62">pass</text>
+            <text x="390" y="47">Forward</text><text x="390" y="62">pass</text>
+            <text x="545" y="47">Forward</text><text x="545" y="62">pass</text>
+            <text x="700" y="47">Forward</text><text x="700" y="62">pass</text>
+          </g>
+          <g class="dg-box-sub" text-anchor="middle">
+            <text x="80" y="77">Target &middot; 8B</text>
+            <text x="235" y="77">Target &middot; 8B</text>
+            <text x="390" y="77">Target &middot; 8B</text>
+            <text x="545" y="77">Target &middot; 8B</text>
+            <text x="700" y="77">Target &middot; 8B</text>
+          </g>
+          <line x1="140" y1="52" x2="171" y2="52" class="dg-arrow" marker-end="url(#mo-arrow)"></line>
+          <text x="155" y="42" class="dg-label" text-anchor="middle">waits</text>
+          <line x1="295" y1="52" x2="326" y2="52" class="dg-arrow" marker-end="url(#mo-arrow)"></line>
+          <line x1="450" y1="52" x2="481" y2="52" class="dg-arrow" marker-end="url(#mo-arrow)"></line>
+          <line x1="605" y1="52" x2="636" y2="52" class="dg-arrow-faint" marker-end="url(#mo-arrow-faint)"></line>
+          <line x1="80"  y1="85" x2="80"  y2="120" class="dg-arrow" marker-end="url(#mo-arrow)"></line>
+          <line x1="235" y1="85" x2="235" y2="120" class="dg-arrow" marker-end="url(#mo-arrow)"></line>
+          <line x1="390" y1="85" x2="390" y2="120" class="dg-arrow" marker-end="url(#mo-arrow)"></line>
+          <line x1="545" y1="85" x2="545" y2="120" class="dg-arrow" marker-end="url(#mo-arrow)"></line>
+          <line x1="700" y1="85" x2="700" y2="120" class="dg-arrow-faint" marker-end="url(#mo-arrow-faint)"></line>
+          <circle cx="80"  cy="136" r="15" class="dg-token"></circle>
+          <circle cx="235" cy="136" r="15" class="dg-token"></circle>
+          <circle cx="390" cy="136" r="15" class="dg-token"></circle>
+          <circle cx="545" cy="136" r="15" class="dg-token"></circle>
+          <circle cx="700" cy="136" r="15" class="dg-token-faint"></circle>
+          <g class="dg-token-text" text-anchor="middle">
+            <text x="80"  y="140">t&#8321;</text>
+            <text x="235" y="140">t&#8322;</text>
+            <text x="390" y="140">t&#8323;</text>
+            <text x="545" y="140">t&#8324;</text>
+            <text x="700" y="140">t&#8345;</text>
+          </g>
+          <text x="400" y="188" class="dg-label" text-anchor="middle" style="font-size:12px;">each new token waits on the previous one &mdash; sequential decode</text>
+        </svg>
+        <figcaption class="panel-cap"><span>Step <i>i</i>+1 cannot begin until token <i>i</i> is known</span><span>One full 8B target step per subsequent token</span></figcaption>
+      </figure>
+      <p class="takeaway">Speculation tries to amortize that expensive target-model step across several candidate tokens.</p>
+    </div>
+  </section>
+
+  <!-- 03 BACKGROUND -->
+  <section class="slide" id="slide-03">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Background</span><span>03 / 15</span></div>
+    <div class="slide-body">
+      <p class="kicker">How it works</p>
+      <h2 class="slide-title">Draft several; verify together</h2>
+      <div class="mechanism-row">
+        <div class="mechanism-step">
+          <span class="num">01 &middot; Draft</span>
+          <h3>Propose</h3>
+          <p>A cheaper mechanism predicts several candidate tokens ahead of the confirmed sequence.</p>
+        </div>
+        <div class="mechanism-arrow">&rarr;</div>
+        <div class="mechanism-step">
+          <span class="num">02 &middot; Target</span>
+          <h3>Verify</h3>
+          <p>The 8B model scores the candidate positions together in one verification step.</p>
+        </div>
+        <div class="mechanism-arrow">&rarr;</div>
+        <div class="mechanism-step">
+          <span class="num">03 &middot; Commit</span>
+          <h3>Resolve</h3>
+          <p>Accept the matching prefix; reject from the first mismatch and continue with the target prediction.</p>
+        </div>
+      </div>
+      <div class="correctness-strip">
+        <span><b>Correctness.</b> With the exact acceptance procedure, the target model&rsquo;s output distribution is preserved.</span>
+        <span><b>Trade-off.</b> The speedup must repay the cost of the drafter and the larger verification step.</span>
+      </div>
+      <p class="src-note">Leviathan et al., ICML 2023 &middot; <a href="https://proceedings.mlr.press/v202/leviathan23a.html">primary source</a></p>
+    </div>
+  </section>
+
+  <!-- 04 METHODS -->
+  <section class="slide packed" id="slide-04">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Methods benchmarked</span><span>04 / 15</span></div>
+    <div class="slide-body top-align">
+      <p class="kicker">Four mechanisms &middot; one 8B target</p>
+      <h2 class="slide-title">The drafter changes; the target does not</h2>
+      <div class="method-grid">
+        <div class="method-card">
+          <div><h3>AR baseline</h3><div class="method-meta">vLLM + SGLang</div></div>
+          <p>No drafter. The 8B target generates one token at a time.</p>
+        </div>
+        <div class="method-card">
+          <div><h3>Classical 1B</h3><div class="method-meta">vLLM + SGLang</div></div>
+          <p>A separate Llama-3.2-1B model drafts sequentially; the 8B target verifies.</p>
+        </div>
+        <div class="method-card">
+          <div><h3>Medusa</h3><div class="method-meta">vLLM only</div></div>
+          <p>Additional heads predict future-token candidates in parallel; continuations use tree-based verification.</p>
+        </div>
+        <div class="method-card">
+          <div><h3>EAGLE-3</h3><div class="method-meta">vLLM + SGLang</div></div>
+          <p>A specialized module performs direct token prediction using multi-layer target-model features.</p>
+        </div>
+      </div>
+      <div class="correctness-strip">
+        <span><b>vLLM ablation:</b> fixed draft lengths <i>K</i>&isin;{1,3,5}.</span>
+        <span><b>SGLang adaptive:</b> a distinct acceptance-driven runtime policy; results are not pooled with the vLLM grid.</span>
+      </div>
+      <p class="quiet-note">Medusa is N/A on SGLang because it is not listed in the 0.5.17 speculative-decoding documentation. EAGLE-3 checkpoints are engine-specific and were not mixed.</p>
+    </div>
+  </section>
+
+  <!-- 05 SETUP -->
+  <section class="slide packed" id="slide-05">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Experimental setup</span><span>05 / 15</span></div>
+    <div class="slide-body top-align">
+      <p class="kicker">Measurement pipeline</p>
+      <h2 class="slide-title">One workload; two independent servers</h2>
+      <div class="setup-pipeline">
+        <div class="setup-node">
+          <div class="label">Input</div>
+          <div class="value">16 technical prompts</div>
+          <div class="detail">Greedy decoding &middot; <i>T</i>=0 &middot; max 256 new tokens</div>
+        </div>
+        <div class="pipeline-arrow">&rarr;</div>
+        <div class="setup-node">
+          <div class="label">Shared target</div>
+          <div class="value">Llama-3.1-8B-Instruct</div>
+          <div class="detail">BF16 &middot; context 4096 &middot; NVIDIA L40, 48 GB GDDR6</div>
+        </div>
+        <div class="pipeline-arrow">&rarr;</div>
+        <div class="setup-node">
+          <div class="label">Serving stacks</div>
+          <div class="value">vLLM 0.27.1 + SGLang 0.5.17</div>
+          <div class="detail">One process at a time; concurrency 1 and 16</div>
+        </div>
+      </div>
+      <div class="fact-strip">
+        <div class="fact"><div class="k">Primary measure</div><div class="v">Output tokens/s</div></div>
+        <div class="fact"><div class="k">Latency</div><div class="v">TTFT + TPOT</div></div>
+        <div class="fact"><div class="k">Resources</div><div class="v">Peak VRAM</div></div>
+        <div class="fact"><div class="k">Draft behavior</div><div class="v">vLLM acceptance counters</div></div>
+      </div>
+      <p class="design-warning"><b>Known asymmetry:</b> vLLM classical 1B and Medusa ran with <code>--enforce-eager</code> after CUDA-graph capture aborted on the virtual GPU; SGLang retained graphs. Every speedup is therefore computed against the same engine&rsquo;s AR baseline.</p>
+      <p class="quiet-note">All reported cells completed 16/16 requests. The small workload and single published run per cell limit statistical claims.</p>
+    </div>
+  </section>
+
+  <!-- 06 DESIGN -->
+  <section class="slide" id="slide-06">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Comparison design</span><span>06 / 15</span></div>
+    <div class="slide-body">
+      <p class="kicker">What the experiment can isolate</p>
+      <h2 class="slide-title">Fixed model; real serving-stack differences</h2>
+      <div class="control-grid">
+        <div class="control-col">
+          <h3>Held fixed</h3>
+          <ul class="control-list">
+            <li><b>Target:</b> Llama-3.1-8B-Instruct weights + tokenizer</li>
+            <li><b>Workload:</b> same prompts, decoding settings, GPU, and loads</li>
+            <li><b>Measurement:</b> shared client and metric definitions</li>
+          </ul>
+        </div>
+        <div class="control-col varies">
+          <h3>Engine-specific</h3>
+          <ul class="control-list">
+            <li><b>Execution:</b> scheduler, kernels, CUDA graphs, memory management</li>
+            <li><b>Coverage:</b> which speculative methods each engine exposes</li>
+            <li><b>Artifacts:</b> legal EAGLE-3 checkpoint and configuration</li>
+          </ul>
+        </div>
+      </div>
+      <p class="design-warning">This is an end-to-end serving comparison, not a controlled engine-only experiment. Similar rankings support, but do not prove, an algorithmic advantage.</p>
+    </div>
+  </section>
+
+  <!-- 07 RESULT c=1 -->
+  <section class="slide packed" id="slide-07">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Result &middot; concurrency 1</span><span>07 / 15</span></div>
+    <div class="slide-body">
+      <p class="kicker">Project-reported &middot; interactive load &middot; NVIDIA L40</p>
+      <h2 class="slide-title">EAGLE-3 leads on both engines</h2>
+      <div class="result-board" aria-label="Concurrency one speedups relative to each engine's autoregressive baseline">
+        <div class="engine-result">
+          <div><div class="engine-name">vLLM</div><div class="result-method">EAGLE-3 &middot; <i>K</i>=5</div></div>
+          <div><div class="speed-track"><div class="speed-fill" style="--speed:2.48"></div></div><div class="speed-labels"><span>0&times;</span><span>AR 1&times;</span><span>2.5&times;</span></div></div>
+          <div class="speed-value">2.48&times;</div>
+        </div>
+        <div class="engine-result">
+          <div><div class="engine-name">SGLang</div><div class="result-method">EAGLE-3 &middot; adaptive</div></div>
+          <div><div class="speed-track"><div class="speed-fill" style="--speed:2.36"></div></div><div class="speed-labels"><span>0&times;</span><span>AR 1&times;</span><span>2.5&times;</span></div></div>
+          <div class="speed-value">2.36&times;</div>
+        </div>
+      </div>
+      <div class="result-summary">
+        <div class="summary-cell"><b>Closest cross-engine comparison:</b> EAGLE-3 <i>K</i>=3 reports 2.22&times; on vLLM and 2.24&times; on SGLang.</div>
+        <div class="summary-cell"><b>Engine-sensitive case:</b> classical 1B reports 1.05&times; on eager-mode vLLM versus 1.90&times; on graph-enabled SGLang.</div>
+      </div>
+      <p class="quiet-note">Throughput: 99.5 tok/s on vLLM; 83.0 tok/s on SGLang. Similar EAGLE rankings are consistent with an algorithmic advantage, not proof of algorithm-only causality.</p>
+    </div>
+  </section>
+
+  <!-- 08 RESULT c=16 -->
+  <section class="slide packed" id="slide-08">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Result &middot; concurrency 16</span><span>08 / 15</span></div>
+    <div class="slide-body">
+      <p class="kicker">Project-reported &middot; shared-GPU load &middot; NVIDIA L40</p>
+      <h2 class="slide-title">EAGLE still wins; one configuration regresses</h2>
+      <div class="result-board" aria-label="Concurrency sixteen speedups relative to each engine's autoregressive baseline">
+        <div class="engine-result">
+          <div><div class="engine-name">vLLM</div><div class="result-method">EAGLE-3 &middot; <i>K</i>=5</div></div>
+          <div><div class="speed-track"><div class="speed-fill" style="--speed:2.01"></div></div><div class="speed-labels"><span>0&times;</span><span>AR 1&times;</span><span>2.5&times;</span></div></div>
+          <div class="speed-value">2.01&times;</div>
+        </div>
+        <div class="engine-result">
+          <div><div class="engine-name">SGLang</div><div class="result-method">EAGLE-3 &middot; adaptive</div></div>
+          <div><div class="speed-track"><div class="speed-fill" style="--speed:1.49"></div></div><div class="speed-labels"><span>0&times;</span><span>AR 1&times;</span><span>2.5&times;</span></div></div>
+          <div class="speed-value">1.49&times;</div>
+        </div>
+        <div class="engine-result">
+          <div><div class="engine-name">vLLM</div><div class="result-method">Classical 1B &middot; eager*</div></div>
+          <div><div class="speed-track"><div class="speed-fill under" style="--speed:0.90"></div></div><div class="speed-labels"><span>0&times;</span><span>AR 1&times;</span><span>2.5&times;</span></div></div>
+          <div class="speed-value under">0.90&times;</div>
+        </div>
+      </div>
+      <p class="takeaway">The often-cited batch crossover did not occur for EAGLE at concurrency 16 on this L40; it did occur for eager-mode vLLM classical speculation.</p>
+      <p class="quiet-note">Throughput: vLLM EAGLE-3 <i>K</i>=5, 831.5 tok/s; SGLang adaptive, 628.6 tok/s. This is a result for this workload and GPU, not a general high-batch law.</p>
+    </div>
+  </section>
+
+  <!-- 09 FULL TABLE -->
+  <section class="slide packed" id="slide-09">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Result &middot; full matrix</span><span>09 / 15</span></div>
+    <div class="slide-body top-align">
+      <p class="kicker">Project-reported measurements</p>
+      <h2 class="slide-title">The ranking is clear; the magnitude is stack-dependent</h2>
+      <div class="matrix-key"><span><b>tok/s</b> = output throughput</span><span><b>&times;AR</b> = same-engine speedup</span><span><b>accept</b> = vLLM mean accepted tokens/draft</span></div>
+      <div class="table-wrap">
+        <table class="spec compact matrix">
+          <thead>
+            <tr>
+              <th>Engine</th><th>Method</th><th class="mono">c=1 tok/s</th><th class="mono">&times;AR</th>
+              <th class="mono">c=16 tok/s</th><th class="mono">&times;AR</th><th class="mono">accept</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td rowspan="6">vLLM 0.27</td><td>AR baseline</td><td class="mono">40.2</td><td class="mono">1.00</td><td class="mono">413.7</td><td class="mono">1.00</td><td class="mono muted-cell">&mdash;</td></tr>
+            <tr><td>Classical 1B*</td><td class="mono">42.3</td><td class="mono">1.05</td><td class="mono">373.6</td><td class="mono lo">0.90</td><td class="mono">2.56 / 2.69</td></tr>
+            <tr><td>Medusa*</td><td class="mono">55.9</td><td class="mono">1.39</td><td class="mono">463.7</td><td class="mono">1.12</td><td class="mono">0.96 / 0.94</td></tr>
+            <tr><td>EAGLE-3 <i>K</i>=1</td><td class="mono">66.8</td><td class="mono">1.66</td><td class="mono">600.3</td><td class="mono">1.45</td><td class="mono">0.76 / 0.75</td></tr>
+            <tr><td>EAGLE-3 <i>K</i>=3</td><td class="mono">89.1</td><td class="mono">2.22</td><td class="mono">741.9</td><td class="mono">1.79</td><td class="mono">1.65 / 1.62</td></tr>
+            <tr><td>EAGLE-3 <i>K</i>=5</td><td class="mono hi">99.5</td><td class="mono hi">2.48</td><td class="mono hi">831.5</td><td class="mono hi">2.01</td><td class="mono">2.05 / 2.07</td></tr>
+            <tr class="engine-break"><td rowspan="5">SGLang 0.5</td><td>AR baseline</td><td class="mono">35.1</td><td class="mono">1.00</td><td class="mono">421.0</td><td class="mono">1.00</td><td class="mono muted-cell">&mdash;</td></tr>
+            <tr><td>Classical 1B</td><td class="mono">66.9</td><td class="mono">1.90</td><td class="mono">505.5</td><td class="mono">1.20</td><td class="mono muted-cell">&mdash;</td></tr>
+            <tr><td>Medusa</td><td class="mono muted-cell" colspan="5">N/A &middot; not listed in SGLang 0.5.17 documentation</td></tr>
+            <tr><td>EAGLE-3</td><td class="mono">78.6</td><td class="mono">2.24</td><td class="mono">589.7</td><td class="mono">1.40</td><td class="mono muted-cell">&mdash;</td></tr>
+            <tr><td>EAGLE adaptive</td><td class="mono hi">83.0</td><td class="mono hi">2.36</td><td class="mono hi">628.6</td><td class="mono hi">1.49</td><td class="mono muted-cell">&mdash;</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="quiet-note">*eager. Acceptance values are c=1 / c=16 and vLLM-primary; blanks are unavailable, not zero. TPOT, TTFT, VRAM, and full-precision values remain in <code>results/table_latest.json</code>.</p>
+    </div>
+  </section>
+
+  <!-- 10 K ABLATION -->
+  <section class="slide packed" id="slide-10">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Result &middot; fixed-<i>K</i> ablation</span><span>10 / 15</span></div>
+    <div class="slide-body top-align">
+      <p class="kicker">EAGLE-3 fixed-<i>K</i> ablation &middot; vLLM</p>
+      <h2 class="slide-title">Longer drafts helped through <i>K</i>=5 on this grid</h2>
+      <figure class="panel">
+        <svg id="chart-dumbbell" class="chart-svg" role="img" aria-label="Project-reported speedup versus AR at concurrency 1 and 16 for vLLM EAGLE-3 fixed K equals 1, 3, and 5"></svg>
+        <figcaption class="panel-cap"><span>Speedup versus vLLM AR</span><span>dashed line = AR baseline</span></figcaption>
+      </figure>
+      <div class="ablation-readout">
+        <div class="k-readout"><h3><i>K</i>=1</h3><div class="k-metrics"><div class="k-metric"><div class="n">0.76</div><div class="l">accepted</div></div><div class="k-metric"><div class="n">1.66&times;</div><div class="l">c=1</div></div></div></div>
+        <div class="k-readout"><h3><i>K</i>=3</h3><div class="k-metrics"><div class="k-metric"><div class="n">1.65</div><div class="l">accepted</div></div><div class="k-metric"><div class="n">2.22&times;</div><div class="l">c=1</div></div></div></div>
+        <div class="k-readout best"><h3><i>K</i>=5</h3><div class="k-metrics"><div class="k-metric"><div class="n">2.05</div><div class="l">accepted</div></div><div class="k-metric"><div class="n">2.48&times;</div><div class="l">c=1</div></div></div></div>
+      </div>
+      <p class="quiet-note">Fixed <i>K</i> values are separate vLLM configurations. SGLang adaptive decoding is a different acceptance-driven policy and is not a point on this curve. <i>K</i>&gt;5 was not tested.</p>
+    </div>
+  </section>
+
+  <!-- 11 ATTRIBUTION -->
+  <section class="slide packed" id="slide-11">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Why</span><span>11 / 15</span></div>
+    <div class="slide-body top-align">
+      <p class="kicker">Qualified interpretations &middot; project-reported</p>
+      <h2 class="slide-title">Acceptance helps; total cost decides</h2>
+      <div class="accounting">speedup &approx; accepted work &divide; (draft cost + verification cost)</div>
+      <div class="case-list">
+        <div class="case">
+          <div class="case-title">Draft quality</div>
+          <p>Medusa accepts 0.96 tokens/draft versus 2.05 for EAGLE <i>K</i>=5; their c=1 speedups are 1.39&times; and 2.48&times;.</p>
+        </div>
+        <div class="case">
+          <div class="case-title">Draft cost</div>
+          <p>Classical 1B accepts more (2.56) yet reports only 1.05&times; on eager-mode vLLM. High acceptance alone is insufficient.</p>
+        </div>
+        <div class="case">
+          <div class="case-title">Serving stack</div>
+          <p>The same 1B draft reports 1.05&times; on eager-mode vLLM and 1.90&times; on graph-enabled SGLang; this gap is confounded.</p>
+        </div>
+        <div class="case">
+          <div class="case-title">Offered load</div>
+          <p>EAGLE remains above AR at c=16, but gains shrink as verification work grows with effective batch &times; <i>K</i>.</p>
+        </div>
+      </div>
+      <p class="quiet-note">These comparisons are consistent with the mechanisms above; the experiment does not separately estimate each component&rsquo;s causal contribution.</p>
+    </div>
+  </section>
+
+  <!-- 12 IMPLICATIONS -->
+  <section class="slide packed" id="slide-12">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Serving implications</span><span>12 / 15</span></div>
+    <div class="slide-body top-align">
+      <p class="kicker">Conditional on this setup</p>
+      <h2 class="slide-title">The best observed choice depends on engine and load</h2>
+      <div class="decision-grid">
+        <div class="decision-cell head">Load</div>
+        <div class="decision-cell head">vLLM 0.27.1</div>
+        <div class="decision-cell head">SGLang 0.5.17</div>
+        <div class="decision-cell rowhead">c=1</div>
+        <div class="decision-cell decision-choice"><b>EAGLE-3, <i>K</i>=5</b>99.5 tok/s &middot; 2.48&times; AR</div>
+        <div class="decision-cell decision-choice"><b>EAGLE adaptive</b>83.0 tok/s &middot; 2.36&times; AR</div>
+        <div class="decision-cell rowhead">c=16</div>
+        <div class="decision-cell decision-choice"><b>EAGLE-3, <i>K</i>=5</b>831.5 tok/s &middot; 2.01&times; AR</div>
+        <div class="decision-cell decision-choice"><b>EAGLE adaptive</b>628.6 tok/s &middot; 1.49&times; AR</div>
+      </div>
+      <p class="design-warning">Do not generalize the vLLM classical or Medusa rows: both include eager-mode execution. Medusa is N/A on SGLang in the documentation version used here.</p>
+    </div>
+  </section>
+
+  <!-- 13 LIMITATIONS -->
+  <section class="slide packed" id="slide-13">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Limitations</span><span>13 / 15</span></div>
+    <div class="slide-body top-align">
+      <p class="kicker">Scope of the evidence</p>
+      <h2 class="slide-title">Read the trend, not the third decimal</h2>
+      <div class="scope-frame">
+        <div class="scope-out">Outside this study: 70B or MoE models &middot; A100/H100 &middot; sampled decoding &middot; production traffic &middot; statistical confidence intervals</div>
+        <div class="scope-in">
+          <h3>What was measured</h3>
+          <p>Llama-3.1-8B-Instruct &middot; NVIDIA L40, 48 GB &middot; BF16 &middot; greedy <i>T</i>=0 &middot; 16 short prompts &middot; vLLM 0.27.1 + SGLang 0.5.17</p>
+        </div>
+      </div>
+      <div class="limit-strip">
+        <div class="limit"><b>Statistical limit</b>One published run per configuration after warmup; no error bars.</div>
+        <div class="limit"><b>Internal confound</b>vLLM 1B and Medusa used eager mode; SGLang retained graphs.</div>
+        <div class="limit"><b>Asymmetric telemetry</b>Acceptance analysis is vLLM-primary because equivalent counters were unavailable.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14 CONCLUSIONS -->
+  <section class="slide" id="slide-14">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Conclusions</span><span>14 / 15</span></div>
+    <div class="slide-body">
+      <p class="kicker">Answers to the research questions</p>
+      <h2 class="slide-title">There is no universal speculative-decoding speedup</h2>
+      <div class="close-grid">
+        <div>
+          <div class="range-line">
+            <div><div class="close-number">2.48&times;</div><div class="close-label">best observed</div></div>
+            <span class="range-word">to</span>
+            <div style="text-align:right"><div class="close-number" style="color:#9b2c2c">0.90&times;</div><div class="close-label">worst observed</div></div>
+          </div>
+        </div>
+        <div class="close-points">
+          <div class="close-point"><b>Ranking:</b> EAGLE-3 is first on both engines at c=1 and remains first at c=16.</div>
+          <div class="close-point"><b>Load:</b> EAGLE gains shrink but remain positive at c=16 on this L40.</div>
+          <div class="close-point"><b>Attribution:</b> acceptance, draft cost, graph mode, checkpoint, and engine implementation all matter.</div>
+        </div>
+      </div>
+      <p class="takeaway">A useful serving claim names the draft method, engine, hardware, and offered load.</p>
+      <p class="end-note">Speculative Decoding Benchmark &mdash; Bharath Thiruveedula &amp; Abhishek Kumar &mdash; Scalable Machine Learning, The University of Texas at Austin</p>
+    </div>
+  </section>
+
+  <!-- 15 VALIDATION -->
+  <section class="slide packed" id="slide-15">
+    <div class="rule-band"></div>
+    <div class="chrome-top"><span>Appendix &middot; evidence</span><span>15 / 15</span></div>
+    <div class="slide-body top-align">
+      <p class="kicker">Reproducibility and primary sources</p>
+      <h2 class="slide-title">Evidence behind the deck</h2>
+      <div class="appendix-grid">
+        <div>
+          <p class="kicker">Project artifacts</p>
+          <ul class="artifact-list">
+            <li><b>Repository:</b> <a href="https://github.com/bharaththiruveedula/benchmark-speculative-decoding">github.com/bharaththiruveedula/benchmark-speculative-decoding</a></li>
+            <li><b>Measurements:</b> <code>results/table_latest.json</code></li>
+            <li><b>Shared client:</b> <code>bench/run.py</code></li>
+            <li><b>Server settings:</b> method-specific files under <code>configs/</code></li>
+            <li><b>Reported coverage:</b> 16/16 completed requests per published cell</li>
+            <li><b>Still needed for independent verification:</b> raw logs, exact warmup trace, and repeated runs</li>
+          </ul>
+        </div>
+        <div>
+          <p class="kicker">Primary sources</p>
+          <ul class="src-list">
+            <li>Speculative decoding: <a href="https://proceedings.mlr.press/v202/leviathan23a.html">Leviathan et al., ICML 2023</a></li>
+            <li>Medusa: <a href="https://arxiv.org/abs/2401.10774">Cai et al., 2024</a></li>
+            <li>EAGLE-3: <a href="https://arxiv.org/abs/2503.01840">Li et al., 2025</a></li>
+            <li>vLLM: <a href="https://docs.vllm.ai/en/stable/features/speculative_decoding/">speculative-decoding documentation</a></li>
+            <li>SGLang: <a href="https://docs.sglang.ai/advanced_features/speculative_decoding.html">speculative-decoding documentation</a></li>
+            <li>NVIDIA: <a href="https://www.nvidia.com/en-us/data-center/l40/">L40 specifications</a></li>
+          </ul>
+        </div>
+      </div>
+      <p class="quiet-note">Benchmark values are project-reported. Externally verifiable architecture and hardware statements are tied to the primary sources above.</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  function svgEl(tag, attrs){
+    var el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  function renderDumbbell(svgId, data, opts){
+    var svg = document.getElementById(svgId);
+    if (!svg) return;
+    var min = opts.min, max = opts.max, baseline = opts.baseline;
+    var W = 640, rowH = 48, topPad = 36, botPad = 32;
+    var H = data.length * rowH + topPad + botPad;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var marginLeft = 160, marginRight = 70;
+    var plotW = W - marginLeft - marginRight;
+    function scaleX(v){ return marginLeft + (v - min) / (max - min) * plotW; }
+
+    var legendY = 16;
+    var l1 = svgEl("circle", {cx: marginLeft, cy: legendY, r:5, class:"dot-before"});
+    var l1t = svgEl("text", {x: marginLeft + 12, y: legendY + 4, class:"cat-label"});
+    l1t.textContent = "c = 1";
+    var l2 = svgEl("circle", {cx: marginLeft + 90, cy: legendY, r:5, class:"dot-after"});
+    var l2t = svgEl("text", {x: marginLeft + 102, y: legendY + 4, class:"cat-label"});
+    l2t.textContent = "c = 16";
+    svg.appendChild(l1); svg.appendChild(l1t); svg.appendChild(l2); svg.appendChild(l2t);
+
+    var baseX = scaleX(baseline);
+    svg.appendChild(svgEl("line", {x1:baseX, x2:baseX, y1: topPad - 10, y2: H - botPad + 6, class:"ref-line"}));
+
+    data.forEach(function(d, i){
+      var y = topPad + i * rowH + rowH/2 - 10;
+      var x1 = scaleX(d.c1), x2 = scaleX(d.c16);
+      var label = svgEl("text", {x: marginLeft - 16, y: y + 4, class:"cat-label", "text-anchor":"end"});
+      label.textContent = d.method;
+      svg.appendChild(label);
+      svg.appendChild(svgEl("line", {x1:x1, x2:x2, y1:y, y2:y, class:"dumbbell-link"}));
+      svg.appendChild(svgEl("circle", {cx:x1, cy:y, r:7, class:"dot-before"}));
+      svg.appendChild(svgEl("circle", {cx:x2, cy:y, r:7, class:"dot-after"}));
+      var dLabel = svgEl("text", {x: Math.max(x1, x2) + 12, y: y + 4, class:"delta-label", "text-anchor":"start"});
+      var delta = d.c16 - d.c1;
+      dLabel.textContent = (delta >= 0 ? "+" : "") + delta.toFixed(2) + "×";
+      svg.appendChild(dLabel);
+    });
+
+    var ticks = opts.ticks || [1, 1.5, 2, 2.5];
+    var axisY = H - botPad + 24;
+    ticks.forEach(function(t){
+      if (t < min || t > max) return;
+      var x = scaleX(t);
+      svg.appendChild(svgEl("line", {x1:x, x2:x, y1:H-botPad+2, y2:H-botPad+8, class:"tick"}));
+      var tx = svgEl("text", {x:x, y:axisY, class:"axis-label", "text-anchor":"middle"});
+      tx.textContent = t.toFixed(2) + "×";
+      svg.appendChild(tx);
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function(){
+    renderDumbbell("chart-dumbbell", [
+      {method:"EAGLE-3 K=1", c1:1.66, c16:1.45},
+      {method:"EAGLE-3 K=3", c1:2.22, c16:1.79},
+      {method:"EAGLE-3 K=5", c1:2.48, c16:2.01}
+    ], {min:1.0, max:2.7, baseline:1.0, ticks:[1.0, 1.5, 2.0, 2.5]});
+
+    var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+    var idx = 0;
+    function syncFromScroll(){
+      var y = window.scrollY + window.innerHeight * 0.35;
+      for (var i = 0; i < slides.length; i++){
+        if (slides[i].offsetTop <= y) idx = i;
+      }
+    }
+    function goTo(i){
+      idx = Math.max(0, Math.min(slides.length - 1, i));
+      slides[idx].scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    window.addEventListener("scroll", function(){
+      if (scrollSync) syncFromScroll();
+    }, { passive: true });
+    var scrollSync = true;
+    var syncTimer;
+    document.addEventListener("keydown", function(e){
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      var next = ["ArrowRight", "ArrowDown", "PageDown", " "];
+      var prev = ["ArrowLeft", "ArrowUp", "PageUp"];
+      if (next.indexOf(e.key) !== -1){
+        e.preventDefault();
+        scrollSync = false;
+        goTo(idx + 1);
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(function(){ scrollSync = true; }, 450);
+      } else if (prev.indexOf(e.key) !== -1){
+        e.preventDefault();
+        scrollSync = false;
+        goTo(idx - 1);
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(function(){ scrollSync = true; }, 450);
+      } else if (e.key === "Home"){
+        e.preventDefault();
+        goTo(0);
+      } else if (e.key === "End"){
+        e.preventDefault();
+        goTo(slides.length - 1);
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

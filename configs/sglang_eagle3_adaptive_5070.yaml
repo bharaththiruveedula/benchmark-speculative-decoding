@@ -1,0 +1,28 @@
+# SGLang adaptive speculation (topk=1 + accept thresholds). Not the same as vLLM DSD.
+engine: sglang
+method: eagle3_adaptive
+base_url: http://127.0.0.1:30000/v1
+port: 30000
+gpu_id: 1
+base_gpu_id: 1
+gpu_index: 1
+model: RedHatAI/Meta-Llama-3.1-8B-Instruct-FP8-dynamic
+dtype: auto
+tensor_parallel_size: 1
+mem_fraction_static: 0.72
+max_model_len: 1024
+disable_cuda_graph: true
+max_tokens: 256
+temperature: 0.0
+concurrency: 1
+max_wait_s: 900
+enable_metrics: true
+prompts: prompts/warmup.jsonl
+speculative:
+  algorithm: EAGLE3
+  draft_model: lmsys/SGLang-EAGLE3-Llama-3.1-8B-Instruct-SpecForge
+  num_steps: 5
+  eagle_topk: 1
+  num_draft_tokens: 6
+  accept_threshold_single: 0.8
+  accept_threshold_acc: 0.9
